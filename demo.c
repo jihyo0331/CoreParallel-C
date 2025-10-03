@@ -30,15 +30,6 @@ static unsigned char *read_file(const char *path, size_t *len_out){
     return buf;
 }
 
-// 파일 쓰기
-static int write_file(const char *path, const unsigned char *data, size_t len){
-    FILE *f = fopen(path, "wb");
-    if (!f) { perror("fopen"); return -1; }
-    if (fwrite(data, 1, len, f) != len) { perror("fwrite"); fclose(f); return -1; }
-    fclose(f);
-    return 0;
-}
-
 // 블록 메타
 typedef struct {
     const unsigned char *in;
@@ -48,6 +39,24 @@ typedef struct {
     unsigned int out_len;       // 실제 압축된 길이
     int ok;                     // 0=fail, 1=success
 } Block;
+
+static int write_blocks_concat(const char *path, const Block *blocks, size_t nb){
+    FILE *f = fopen(path, "wb");
+    if (!f) { perror("fopen"); return -1; }
+    for (size_t i=0;i<nb;++i){
+        if (blocks[i].out_len == 0) continue;
+        if (fwrite(blocks[i].out, 1, blocks[i].out_len, f) != blocks[i].out_len){
+            perror("fwrite");
+            fclose(f);
+            return -1;
+        }
+    }
+    if (fclose(f) != 0){
+        perror("fclose");
+        return -1;
+    }
+    return 0;
+}
 
 typedef struct {
     Block *blocks;
@@ -133,14 +142,10 @@ int main(int argc, char **argv){
     printf("single-thread: %.3fs  (%.2f MB/s)\n", single_s, single_MBps);
 
     // 블록 출력 합치기(옵션) — single 결과 파일
-    {
-        size_t out_tot = 0;
-        for (size_t i=0;i<nb;++i) out_tot += blocks[i].out_len;
-        unsigned char *concat = (unsigned char*)malloc(out_tot);
-        size_t pos = 0;
-        for (size_t i=0;i<nb;++i) { memcpy(concat+pos, blocks[i].out, blocks[i].out_len); pos += blocks[i].out_len; }
-        write_file("out_single_concat.bz2", concat, out_tot);
-        free(concat);
+    if (write_blocks_concat("out_single_concat.bz2", blocks, nb) != 0){
+        for (size_t i=0;i<nb;++i) free(blocks[i].out);
+        free(blocks); free(in);
+        return 1;
     }
 
     // 병렬 벤치 위해 출력 버퍼 초기화(다시 압축하도록 ok reset)
@@ -165,14 +170,10 @@ int main(int argc, char **argv){
     printf("speedup: %.2fx\n", single_s / par_s);
 
     // 병렬 결과도 합쳐서 기록
-    {
-        size_t out_tot = 0;
-        for (size_t i=0;i<nb;++i) out_tot += blocks[i].out_len;
-        unsigned char *concat = (unsigned char*)malloc(out_tot);
-        size_t pos = 0;
-        for (size_t i=0;i<nb;++i) { memcpy(concat+pos, blocks[i].out, blocks[i].out_len); pos += blocks[i].out_len; }
-        write_file("out_parallel_concat.bz2", concat, out_tot);
-        free(concat);
+    if (write_blocks_concat("out_parallel_concat.bz2", blocks, nb) != 0){
+        for (size_t i=0;i<nb;++i) free(blocks[i].out);
+        free(blocks); free(in);
+        return 1;
     }
 
     // 정리

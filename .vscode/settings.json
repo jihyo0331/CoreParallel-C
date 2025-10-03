@@ -4,6 +4,7 @@
         "stdio.h": "c",
         "pthread.h": "c",
         "omp.h": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "string.h": "c"
     }
 }
